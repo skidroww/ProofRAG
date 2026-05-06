@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>RAG 검색</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 30px;
+      background: #f9f9f9;
+    }
+
+    h2 {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    /* 좌우 배치를 위한 Flex 레이아웃 적용 */
+    .container {
+      display: flex;
+      gap: 30px;
+      max-width: 1200px; /* 좌우 공간을 위해 너비 확장 */
+      margin: auto;
+    }
+
+    /* 왼쪽 사이드바 (문서 목록) */
+    .sidebar {
+      flex: 1;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      max-height: 800px;
+      overflow-y: auto;
+    }
+
+    /* 오른쪽 메인 (검색창) */
+    .main-content {
+      flex: 2;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+    }
+
+    input, textarea {
+      width: 100%;
+      font-size: 16px;
+      padding: 10px;
+      margin-top: 5px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      box-sizing: border-box; /* 패딩 삐져나감 방지 */
+    }
+
+    textarea {
+      resize: vertical;
+    }
+
+    button {
+      width: 100%;
+      height: 45px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #45a049;
+    }
+
+    /* 문서 목록 카드 디자인 */
+    .doc-card {
+      border: 1px solid #eee;
+      padding: 12px;
+      margin-bottom: 10px;
+      border-radius: 6px;
+      background: #fafafa;
+      cursor: pointer; /* 클릭 가능한 느낌 주기 */
+      transition: background 0.2s;
+    }
+
+    .doc-card:hover {
+      background: #e6f2ff;
+      border-color: #b3d4fc;
+    }
+
+    .doc-title {
+      font-weight: bold;
+      font-size: 14px;
+      margin-bottom: 6px;
+      color: #333;
+      line-height: 1.4;
+    }
+
+    .doc-meta {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 3px;
+    }
+
+    .result-box { margin-top: 20px; }
+    .chunk { background: #fdfdfd; border: 1px solid #ddd; border-radius: 10px; padding: 15px; margin-bottom: 15px; white-space: pre-wrap; }
+    .chunk-id { font-weight: bold; margin-bottom: 8px; color: #333; }
+    .loading { text-align: center; margin-top: 20px; font-weight: bold; }
+    .debug-panel { background: #282c34; color: #61dafb; padding: 15px; border-radius: 8px; margin-top: 20px; font-family: monospace; font-size: 14px; display: none; }
+  </style>
+</head>
+
+<body>
+
+<h2>RAG 의결서 검색기 버전 1.5</h2>
+
+<div class="container">
+  
+  <!-- 왼쪽: DB 저장 문서 목록 -->
+  <div class="sidebar">
+    <h3 style="margin-top:0;">📚 DB 저장 문서</h3>
+    <p style="font-size: 13px; color: #777;">클릭하면 회사명이 자동 입력됩니다.</p>
+    <div id="docList">로딩 중...</div>
+  </div>
+
+  <!-- 오른쪽: 검색 UI -->
+  <div class="main-content">
+    <label>🏢 회사명 (선택)</label>
+    <input id="company" placeholder="예: 타이어뱅크(주) (비워두면 전체 DB 검색)">
+
+    <label>❓ 질문</label>
+    <textarea id="q" rows="5" placeholder="궁금한 내용을 입력하세요."></textarea>
+
+    <button onclick="ask()">검색하기</button>
+
+    <div id="loading" class="loading"></div>
+    <div id="debugPanel" class="debug-panel"></div>
+    <div id="result" class="result-box"></div>
+  </div>
+
+</div>
+
+<script>
+// 페이지가 열리면 즉시 문서 목록을 불러옴
+window.addEventListener('DOMContentLoaded', async () => {
+  const listDiv = document.getElementById('docList');
+  try {
+    const res = await fetch('/docs_info');
+    const docs = await res.json();
+    
+    listDiv.innerHTML = ""; // 로딩 텍스트 지우기
+    
+    if (docs.length === 0) {
+      listDiv.innerHTML = "<p>저장된 문서가 없습니다.</p>";
+      return;
+    }
+
+    docs.forEach(doc => {
+      const card = document.createElement('div');
+      card.className = 'doc-card';
+      
+      // 클릭하면 회사명 인풋박스에 값이 들어가도록 설정
+      card.onclick = () => {
+        document.getElementById('company').value = doc.company;
+      };
+
+      card.innerHTML = `
+        <div class="doc-title">${doc.title}</div>
+        <div class="doc-meta">🏢 <b>기업명:</b> ${doc.company}</div>
+        <div class="doc-meta">⚠️ <b>위반유형:</b> ${doc.violation}</div>
+      `;
+      listDiv.appendChild(card);
+    });
+
+  } catch (err) {
+    listDiv.innerHTML = "<p>문서 목록을 불러오지 못했습니다.</p>";
+    console.error(err);
+  }
+});
+
+async function ask() {
+  const q = document.getElementById("q").value;
+  const company = document.getElementById("company").value;
+
+  const resultDiv = document.getElementById("result");
+  const loadingDiv = document.getElementById("loading");
+  const debugPanel = document.getElementById("debugPanel");
+
+  if (!q.trim()) {
+    alert("질문을 입력해주세요.");
+    return;
+  }
+
+  resultDiv.innerHTML = "";
+  debugPanel.style.display = "none";
+  loadingDiv.innerText = "⏳ 하이브리드 검색 중...";
+
+  try {
+    const res = await fetch("/ask", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        question: q,
+        company: company
+      })
+    });
+
+    const data = await res.json();
+    loadingDiv.innerText = "";
+
+    if (data.timings) {
+      debugPanel.style.display = "block";
+      debugPanel.innerHTML = `
+        <strong>⏱ Execution Timings:</strong><br>
+        - Vector Search: ${data.timings.vector_search} sec<br>
+        - BM25 Search: ${data.timings.bm25_search} sec<br>
+        - RRF Processing: ${data.timings.rrf_processing} sec<br>
+        <hr style="border-color:#444;">
+        - <b>Total Search Time: ${data.timings.total_search} sec</b>
+      `;
+    }
+
+    if (data.results.length === 0) {
+      resultDiv.innerHTML = "<p>검색 결과가 없습니다.</p>";
+      return;
+    }
+
+    data.results.forEach(r => {
+      const chunkDiv = document.createElement("div");
+      chunkDiv.className = "chunk";
+      chunkDiv.innerHTML = `
+        <div class="chunk-id">📄 Chunk ID: ${r.chunk_id}</div>
+        <div>${r.text}</div>
+      `;
+      resultDiv.appendChild(chunkDiv);
+    });
+
+  } catch (err) {
+    loadingDiv.innerText = "";
+    resultDiv.innerHTML = "<p>검색 중 에러가 발생했습니다.</p>";
+    console.error(err);
+  }
+}
+</script>
+
+</body>
+</html>
