@@ -100,9 +100,9 @@ def load_and_inject_data_with_chain(data_dir: str, max_files: int = 10):
     test_files = all_files[:max_files]
     print(f" 테스트 : 전체 {len(all_files)}개 문서 중 {len(test_files)}개만 처리합니다.")
     
-    prev_hash = "GENESIS_ROOT_HASH"
 
     for filename in test_files:
+        prev_hash = "GENESIS_ROOT_HASH"
         base_name = filename.replace("_metadata.json", "") 
         meta_path = os.path.join(data_dir, filename) 
         hybrid_path = os.path.join(data_dir, f"{base_name}_hybrid.json") 
@@ -111,7 +111,11 @@ def load_and_inject_data_with_chain(data_dir: str, max_files: int = 10):
             continue
             
         with open(meta_path, 'r', encoding='utf-8') as f:
-            meta_data = json.load(f)
+            try:
+                meta_data = json.load(f)
+            except Exception as e:
+                print(f"에러: {filename}", e)
+                continue
         with open(hybrid_path, 'r', encoding='utf-8') as f:
             hybrid_data = json.load(f)
             
@@ -125,20 +129,23 @@ def load_and_inject_data_with_chain(data_dir: str, max_files: int = 10):
             company, violation = "기업명없음", "유형없음"
 
     
+
         for i, chunk in enumerate(hybrid_data):
-            chunk_id = chunk["metadata"]["chunk_id"]
+            chunk_id = chunk.get("metadata", {}).get("chunk_id", f"chunk_{i}")
             original_text = chunk.get("page_content", "")
+            if not original_text.strip():
+                continue
             clean_original_text = clean_duplicate_text(original_text)
 
             injected_text = f"[사건명: {title}] [피심인기업명: {company}]\n본문: {clean_original_text}"
 
             #1. 타임 스탬프 생성
-            timestamp = int(time.time())
+            timestamp = int(time.time() * 1000)
 
             #2. 현재 데이터의 고유 해시 생성 (이전 해시 + 텍스트 + 타임스탬프)
             data_to_hash = f"{prev_hash}{injected_text}{timestamp}".encode('utf-8')
             current_hash = hashlib.sha256(data_to_hash).hexdigest()
-            
+                
             processed_chunks.append({
                 "chunk_id": chunk_id,
                 "injected_text": injected_text,
@@ -174,8 +181,10 @@ def build_indices():
         metadatas.append(item["metadata"])
         
         
-        #tokens = okt.morphs(item["injected_text"])
+        
         tokens = tokenize_kiwi(item["injected_text"])
+        if not tokens:
+            tokens = ["EMPTY"]
         tokenized_corpus.append(tokens)
 
     # 2. ChromaDB에 벡터 저장
@@ -188,7 +197,7 @@ def build_indices():
 
         batch_embeddings = embedding_model.encode(batch_docs, normalize_embeddings=True).tolist()
 
-        collection.add(
+        collection.upsert(
             ids=batch_ids,
             embeddings=batch_embeddings, # 벡터값을 명시적으로 전달
             documents=batch_docs,
@@ -198,6 +207,7 @@ def build_indices():
     # 3. BM25 인덱스 생성
     print("BM25 인덱스 구축 중...")
     bm25 = BM25Okapi(tokenized_corpus)
+    
     
     with open(BM25_INDEX_PATH, 'wb') as f:
         pickle.dump(bm25, f)

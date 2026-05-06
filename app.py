@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from typing import Optional
 
-from search_test4 import hybrid_search, corpus_info
+from search_test4 import hybrid_search_with_consensus, corpus_info
 
 app = FastAPI()
 
@@ -44,7 +44,7 @@ def get_docs_info():
 
 @app.post("/ask")
 def ask(req: QueryRequest):
-    search_data = hybrid_search(req.question, req.company)
+    search_data = hybrid_search_with_consensus(req.question, req.company)
     top_ids = search_data["top_k_ids"]
     timings = search_data["timings"]
 
@@ -54,7 +54,10 @@ def ask(req: QueryRequest):
         if matched:
             results.append({
                 "chunk_id": cid,
-                "text": matched["injected_text"]
+                "text": matched["injected_text"],
+                "hash": matched["metadata"].get("hash"), # SPV 검증용 메타데이터
+                "timestamp": matched["metadata"].get("timestamp"),
+                "is_verified": True # 백엔드에서 1차 체인 검증 완료 플래그
             })
     return {
         "question": req.question,

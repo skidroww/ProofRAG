@@ -16,7 +16,7 @@ collection = chroma_client.get_collection(name="ftc_resolutions")
 
 with open("./bm25_index_kiwi.pkl", 'rb') as f:
     bm25 = pickle.load(f)
-with open("./corpus_info.pkl", 'rb') as f:
+with open("./corpus_info_kiwi.pkl", 'rb') as f:
     corpus_info = pickle.load(f)
 
 
@@ -37,7 +37,7 @@ def tokenize_kiwi(text):
 
 print("로딩 완료! 검색을 시작합니다.\n")
 
-def hybrid_search(query: str, target_company: str, top_k: int = 5):
+def hybrid_search_with_consensus(query: str, target_company: str, top_k: int = 5):
     timings = {}
 
     # [1] Vector Search 
@@ -75,19 +75,37 @@ def hybrid_search(query: str, target_company: str, top_k: int = 5):
 
     timings["bm25_search"] = round(time.perf_counter() - t1, 4)
 
-    # [3] RRF (Reciprocal Rank Fusion) 
-    t2 = time.perf_counter()
+    # [3] RRF + Consensus (가장 기 체인 원리)
     k = 60
     rrf_scores = {}
-    vector_weight = 0.7
-    bm25_weight = 0.3
+    vector_weight = 0.6 # 벡터 비중 약간 축소
+    bm25_weight = 0.25 # 벰25 비중 약 축
+    consensus_weight = 0.15 #합의 가중치
+
+    t2 = time.perf_counter()
     
     for rank, doc_id in enumerate(vector_ids):
         rrf_scores[doc_id] = rrf_scores.get(doc_id, 0) + vector_weight * (1 / (k + rank + 1))
-        
     for rank, doc_id in enumerate(bm25_filtered):
         rrf_scores[doc_id] = rrf_scores.get(doc_id, 0) + bm25_weight * (1 / (k + rank + 1))
 
+    # 합의도 평가: 검색된 문서들 간의 메타데이터 유사성/연관성 확인
+    # 예: 같은 회사, 같은 위반유형에 대해 여러 청크가 동시 다발적으로 검색되었다면 신뢰도 상승
+    domain_counts = {}
+    for doc_id in rrf_scores.keys():
+        matched_info = next((item for item in corpus_info if item['chunk_id'] == doc_id), None)
+        if matched_info:
+            violation_type = matched_info["metadata"].get("violation", "")
+            domain_counts[violation_type] = domain_counts.get(violation_type, 0) + 1
+
+    # 다수가 지지하는 정보(가장 긴 체인)에 속한 청크에 가점 부여
+    for doc_id in rrf_scores.keys():
+        matched_info = next((item for item in corpus_info if item['chunk_id'] == doc_id), None)
+        if matched_info:
+            violation_type = matched_info["metadata"].get("violation", "")
+            if domain_counts[violation_type] >= 3: # 3개 이상의 청크가 동일 맥락을 지지할 때
+                rrf_scores[doc_id] += consensus_weight
+    
     sorted_rrf = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
     top_k_ids = [doc_id for doc_id, score in sorted_rrf[:top_k]]
     
@@ -109,10 +127,10 @@ if __name__ == "__main__":
     #test_query = "과징금 납부 기한"
     #target_company = "(사)한국토종닭협회"
     test_query = "타이어뱅크가 대리점에게 적용한 '이월재고 차감' 기준 중, 제조일이 48개월 초과된 일반 타이어(D등급)의 차감 비율은 공장도가격의 몇 퍼센트이며, 공정위가 이 사건과 관련하여 부과한 최종 과징금액은 얼마인가요?"
-    target_company = "타이어뱅크(주)"
+    target_company = ""
     print(f"질문: {target_company}가 {test_query}\n")
     
-    results = hybrid_search(test_query, target_company)
+    results = hybrid_search_with_consensus(test_query, target_company)
     
     print("-" * 80)
     print(f"최종 추출된 Top-5 Chunk IDs (총 {len(results['top_k_ids'])}개):")

@@ -1,6 +1,6 @@
 import pickle
 
-with open("./corpus_info.pkl", 'rb') as f:
+with open("./corpus_info_kiwi.pkl", 'rb') as f:
     corpus_info = pickle.load(f)
 
 doc_info = {}
@@ -33,3 +33,17 @@ for item in corpus_info:
             "company": m["company"],
             "violation": m["violation"]
         })
+
+
+for item in corpus_info:
+    m = item["metadata"]
+
+    print({
+        "chunk_id": item["chunk_id"],
+        "title": m["title"],
+        "company": m["company"],
+        "violation": m["violation"]
+    })
+
+
+print(len(corpus_info))

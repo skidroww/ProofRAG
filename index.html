@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <meta charset="utf-8">
   <title>RAG 검색</title>
 
@@ -105,8 +106,51 @@
       margin-bottom: 3px;
     }
 
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 6px;
+      text-align: center;
+    }
+
+    th {
+      background: #f2f2f2;
+    }
+
+    .chunk table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0;
+      font-size: 13px;
+    }
+
+    .chunk th, .chunk td {
+      border: 1px solid #dee2e6;
+      padding: 8px;
+      text-align: left; /* 중앙 정렬보다는 왼쪽 정렬이 문서 읽기에 편합니다 */
+    }
+
+    /* 텍스트 줄바꿈 및 간격 */
+    .markdown-body p {
+      margin-bottom: 12px;
+    }
+
+
+
     .result-box { margin-top: 20px; }
-    .chunk { background: #fdfdfd; border: 1px solid #ddd; border-radius: 10px; padding: 15px; margin-bottom: 15px; white-space: pre-wrap; }
+    .chunk {
+      background: white;
+      border: 1px solid #e1e4e8;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05); /* 살짝 입체감 부여 */
+    }
     .chunk-id { font-weight: bold; margin-bottom: 8px; color: #333; }
     .loading { text-align: center; margin-top: 20px; font-weight: bold; }
     .debug-panel { background: #282c34; color: #61dafb; padding: 15px; border-radius: 8px; margin-top: 20px; font-family: monospace; font-size: 14px; display: none; }
@@ -229,14 +273,42 @@ async function ask() {
     }
 
     data.results.forEach(r => {
-      const chunkDiv = document.createElement("div");
-      chunkDiv.className = "chunk";
-      chunkDiv.innerHTML = `
-        <div class="chunk-id">📄 Chunk ID: ${r.chunk_id}</div>
-        <div>${r.text}</div>
-      `;
-      resultDiv.appendChild(chunkDiv);
-    });
+          const chunkDiv = document.createElement("div");
+          chunkDiv.className = "chunk";
+          
+          let dateStr = "N/A";
+          let isRecent = false;
+
+          if (r.timestamp && !isNaN(r.timestamp)) {
+            const ts = Number(r.timestamp);
+            dateStr = new Date(ts).toLocaleString();
+            isRecent = (Date.now() - ts) < (1000 * 60 * 60 * 24);
+          }
+
+          // innerHTML 구조 수정: 세로 배치를 위해 block 요소들을 활용
+          chunkDiv.innerHTML = `
+            <!-- 1. 상단 라인: ID와 상태 배지 -->
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+              <span class="chunk-id" style="font-size: 14px; color: #2c3e50;">📄 ${r.chunk_id}</span>
+              <div style="display: flex; gap: 6px; flex-shrink: 0;">
+                ${r.is_verified ? '<span style="background: #e6ffed; color: #1e7e34; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: bold; border: 1px solid #b7eb8f;">✅ 검증됨</span>' : ''}
+                ${isRecent ? '<span style="background: #fff7e6; color: #d46b08; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: bold; border: 1px solid #ffd591;">🆕 최신</span>' : ''}
+              </div>
+            </div>
+
+            <!-- 2. 중간 라인: 타임스탬프 및 해시 (회색 박스 처리로 구분) -->
+            <div style="background: #f1f3f5; padding: 8px 12px; border-radius: 6px; font-size: 12px; color: #666; margin-bottom: 15px; line-height: 1.6;">
+              <div><strong>📅 업데이트:</strong> ${dateStr}</div>
+              <div style="font-family: monospace; color: #888;"><strong># HASH:</strong> ${r.hash ? r.hash.substring(0, 20) + '...' : 'N/A'}</div>
+            </div>
+
+            <!-- 3. 하단 라인: 실제 본문 내용 -->
+            <div class="markdown-body" style="color: #333; line-height: 1.7; font-size: 15px;">
+              ${marked.parse(r.text)}
+            </div>
+          `;
+          resultDiv.appendChild(chunkDiv);
+        });
 
   } catch (err) {
     loadingDiv.innerText = "";
